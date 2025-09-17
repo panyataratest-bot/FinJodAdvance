@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>FIN-JOD · Mentor Dashboard (Read-Only)</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *{ box-sizing:border-box }
+    :root{
+      --bg:#1e1e1e; --bg2:#242424; --panel:#2a2a2a; --line:#3a3a3a; --muted:#bfbfbf; --text:#f1f1f1;
+      --primary:#ff2e80; --primary-2:#e91e63; --blue:#6c8cff; --green:#00c896; --danger:#ff4d4f; --warning:#ffb020;
+      --cyan:#2dd4bf;
+    }
+    html,body{ height:100% }
+    body{
+      margin:0; padding:clamp(.75rem,2vw,2rem);
+      padding-bottom:calc(clamp(.75rem,2vw,2rem) + env(safe-area-inset-bottom,0px));
+      font-family:'Kanit',sans-serif; background:var(--bg); color:var(--text)
+    }
+    h1{ text-align:center; font-size:clamp(1.25rem,4.5vw,2rem); color:var(--primary); margin:0 0 1rem }
+    .container{ width:min(1140px,100%); margin:auto; background:var(--panel); padding:clamp(.75rem,2.5vw,2rem);
+      border-radius:24px; box-shadow:0 12px 30px rgba(0,0,0,.5) }
+
+    .card{ background:var(--bg2); border:1px solid var(--line); border-radius:18px; padding:1.25rem; overflow:hidden }
+    .row{ display:flex; flex-wrap:wrap; gap:1rem; margin-bottom:1rem; align-items:flex-start }
+    .col{ flex:1 1 46%; display:flex; flex-direction:column; gap:.4rem; min-width:220px }
+    .col-range{ flex:1 1 60%; min-width:420px }
+
+    label{ color:var(--muted); font-size:.95rem }
+    input, select, button{ padding:1rem 1.1rem; font-size:16px; border-radius:12px; border:1px solid #555; background:#1e1e1e; color:#fff; min-height:44px }
+    button{ background:var(--primary); border:none; font-weight:700; cursor:pointer; transition:background .2s; touch-action:manipulation }
+    @media (hover:hover) and (pointer:fine){ button:hover{ background:var(--primary-2) } }
+    button:disabled{ opacity:.6; cursor:not-allowed }
+    .btn-ghost{ background:#3a3a3a } .btn-green{ background:var(--green) } .btn-blue{ background:var(--blue) }
+    .segbtn{ background:#3a3a3a } .segbtn.active{ background:var(--primary); color:#fff; font-weight:700 }
+    .chip{ display:inline-block; padding:.35rem .6rem; border:1px solid var(--line); border-radius:999px; font-size:.9rem; color:#ddd }
+    .muted{ color:var(--muted) } .right{ text-align:right }
+
+    /* KPI */
+    .kpi{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem; margin:1rem 0 }
+    .kpi .card{ display:flex; flex-direction:column; gap:.35rem; min-height:92px }
+    .container > .card + .kpi { margin-top:1rem !important }
+
+    /* Charts */
+    .chart-wrap{ height:260px; width:100% }
+    .chart-wrap canvas{ width:100% !important; height:100% !important; display:block }
+    @media(max-width:980px){ .chart-wrap{ height:220px } }
+    @media(max-width:768px){ .chart-wrap{ height:200px } }
+
+    .skeleton{ position:relative; overflow:hidden; background:#2b2b2b; border-radius:8px; min-height:20px }
+    .skeleton::after{ content:""; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent); animation:skeleton 1.2s infinite }
+    @keyframes skeleton{ 100%{ transform:translateX(100%) } }
+
+    #toast{ position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:#333; color:#fff; padding:.75rem 1.2rem; border-radius:12px; opacity:0; transition:.35s; pointer-events:none; z-index:120 }
+    #overlay{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:110 }
+    #overlay.show{ display:flex }
+    .spinner{ width:58px; height:58px; border:6px solid rgba(255,255,255,.35); border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite }
+    @keyframes spin{ to{ transform:rotate(360deg) } }
+    .hide{ display:none }
+
+    /* Range row */
+    .range-inline{ display:grid; grid-template-columns: 180px auto 180px auto auto auto; align-items:end; gap:.5rem }
+    .range-inline .to-sep{ color:var(--muted); align-self:center; padding:0 .25rem }
+    .range-inline input[type="date"]{ min-width:170px }
+
+    /* Table */
+    .table-viewport{ max-height:420px; overflow:auto; border-radius:12px; border:1px solid var(--line); -webkit-overflow-scrolling:touch }
+    table{ width:100%; border-collapse:collapse; table-layout:fixed; font-size:.98rem }
+    th, td{ border-bottom:1px solid var(--line); padding:.8rem .5rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    th{ color:var(--muted); font-weight:600; text-align:left; position:sticky; top:0; background:var(--bg2); z-index:1 }
+    .table-viewport tbody tr:hover{ background:#2f2f2f }
+
+    .badge{ padding:.25rem .5rem; border-radius:999px; font-size:.85rem }
+    .badge-inc{ background:rgba(0,200,150,.18); color:#9ff3df; border:1px solid rgba(0,200,150,.35) }
+    .badge-exp{ background:rgba(233,30,99,.15); color:#ffb6cc; border:1px solid rgba(233,30,99,.35) }
+    .badge-sav{ background:rgba(45,212,191,.16); color:#a7fff0; border:1px solid rgba(45,212,191,.35) }
+
+    /* งบ/เป้าออม (อ่านอย่างเดียว) */
+    .bar-track{ height:10px; background:#3a3a3a; border-radius:999px; overflow:hidden }
+    .bar-fill{ height:100%; width:0% }
+    #budgetBar{ background:linear-gradient(90deg,#6c8cff,#ffb020,#ff4d4f) }
+    #savingBar{ background:linear-gradient(90deg,#2dd4bf,#00c896) }
+    .inline-status{ display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin:.25rem 0 .5rem }
+    .inline-status .sep{ opacity:.55 }
+
+    /* Mobile */
+    @media(max-width:860px){
+      .col-range{ min-width:260px }
+      .range-inline{ grid-template-columns:1fr 1fr; grid-auto-rows:auto }
+      .range-inline .to-sep{ display:none }
+      .range-inline input[type="date"]{ min-width:0; grid-column:1 / -1 }
+      .range-inline .segbtn, .range-inline .btn-blue{ width:100%; grid-column:1 / -1 }
+      .col{ flex:1 1 100% }
+      .table-viewport{ max-height:none; overflow-y:visible; overflow-x:auto; -webkit-overflow-scrolling:touch }
+      table{ min-width:560px; table-layout:auto; font-size:.95rem }
+      th, td{ padding:.65rem .45rem }
+      td:nth-child(3), td:nth-child(5){ white-space:normal }
+      td:nth-child(4){ white-space:nowrap }
+      th{ position:static }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>FIN-JOD · Mentor Dashboard</h1>
+
+    <!-- Gate -->
+    <div id="gate" class="card">
+      <div class="row">
+        <div class="col" style="max-width:360px">
+          <label for="adminPass">รหัสผ่านพี่เลี้ยงการเงิน</label>
+          <input id="adminPass" type="password" placeholder="กรอกรหัสผ่าน"/>
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnEnter" class="btn-green">เข้าสู่ระบบ Mentor</button>
+        <span id="gateMsg" class="muted" style="align-self:center"></span>
+      </div>
+    </div>
+
+    <!-- App -->
+    <div id="app" class="hide">
+      <div class="row" style="align-items:center; margin-top:.25rem">
+        <div class="muted">🔐 Admin Mode</div>
+        <div style="margin-left:auto"><button id="btnLogout" class="btn-ghost">ออกจากระบบ</button></div>
+      </div>
+
+      <!-- Filters -->
+      <div class="card">
+        <div class="row">
+          <div class="col" style="min-width:220px">
+            <label for="selMentor">Fin-ed Mentor</label>
+            <select id="selMentor"></select>
+            <div id="mentorHint" class="muted" style="margin-top:.25rem; display:none">
+              * ไม่พบคอลัมน์ Mentor ในข้อมูลผู้ใช้ — จะแสดงผู้ใช้ทั้งหมด
+            </div>
+          </div>
+          <div class="col" style="min-width:260px">
+            <label for="selUser">เลือกผู้ใช้ (user_id)</label>
+            <select id="selUser" disabled></select>
+          </div>
+          <div class="col col-range">
+            <label>ช่วงวันที่</label>
+            <div class="range-inline">
+              <input id="fFrom" type="date">
+              <span class="to-sep">ถึง</span>
+              <input id="fTo" type="date">
+              <button class="segbtn" id="btnToday">วันนี้</button>
+              <button class="segbtn" id="btnMonth">เดือนนี้</button>
+              <button class="btn-blue" id="btnRefresh">รีเฟรช</button>
+            </div>
+            <div style="margin-top:.5rem"><span class="chip">กำลังดู: <span id="rangeBadge">กำหนดเอง</span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- งบรายเดือน + เป้าออม (อ่านอย่างเดียว) -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="row">
+          <div class="col">
+            <div class="muted">งบรายจ่ายเดือนนี้ (บาท)</div>
+            <div class="inline-status muted">
+              <span>ใช้ไป: <b id="budgetUsedPct">—</b></span><span class="sep">|</span><span id="budgetStatus">รายจ่ายเดือนนี้: —</span>
+            </div>
+            <div class="bar-track"><div id="budgetBar" class="bar-fill"></div></div>
+          </div>
+          <div class="col">
+            <div class="muted">เป้าออมเดือนนี้ (บาท)</div>
+            <div class="inline-status muted">
+              <span>ออมแล้ว: <b id="savingGoalPct">—</b></span><span class="sep">|</span><span>สถานะออมเดือนนี้: <b id="savingGoalStatus">—</b></span>
+            </div>
+            <div class="bar-track"><div id="savingBar" class="bar-fill"></div></div>
+          </div>
+        </div>
+        <div class="muted" style="margin-top:.5rem"><span id="budgetGoalHint">* ใช้ข้อมูลงบ/เป้าออมของเดือนที่เลือก</span></div>
+      </div>
+
+      <!-- KPI -->
+      <div class="kpi" id="kpiWrap">
+        <div class="card"><div class="muted">รายรับรวม</div><div id="sumIncome" style="font-size:1.6rem;font-weight:700" class="skeleton"></div></div>
+        <div class="card"><div class="muted">รายจ่ายรวม</div><div id="sumExpense" style="font-size:1.6rem;font-weight:700" class="skeleton"></div></div>
+        <div class="card"><div class="muted">ออมเงินสุทธิ</div><div id="sumSaving" style="font-size:1.6rem;font-weight:700" class="skeleton"></div></div>
+        <div class="card"><div class="muted">คงเหลือ</div><div id="sumNet" style="font-size:1.6rem;font-weight:700" class="skeleton"></div></div>
+        <div class="card"><div class="muted">ยอดหนี้คงเหลือรวม</div><div id="sumDebt" style="font-size:1.6rem;font-weight:700" class="skeleton"></div></div>
+      </div>
+
+      <!-- Charts -->
+      <div class="row">
+        <div class="card" style="flex:1 1 48%">
+          <div class="muted" style="margin-bottom:.5rem">รายจ่ายตามหมวด</div>
+          <div class="chart-wrap"><canvas id="chartExp"></canvas></div>
+        </div>
+        <div class="card" style="flex:1 1 48%">
+          <div class="muted" style="margin-bottom:.5rem">กระแสเงินสด (รายวัน & สะสม)</div>
+          <div class="chart-wrap"><canvas id="chartFlow"></canvas></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card" style="flex:1 1 48%">
+          <div class="muted" style="margin-bottom:.5rem">หนี้คงเหลือรวม (จำลองรายวัน)</div>
+          <div id="noDataDebtTS" class="muted hide">ยังไม่มีข้อมูลหนี้ในช่วงนี้</div>
+          <div class="chart-wrap"><canvas id="chartDebtTS"></canvas></div>
+        </div>
+        <div class="card" style="flex:1 1 48%">
+          <div class="muted" style="margin-bottom:.5rem">จ่ายต้น vs จ่ายดอก (รายเดือน)</div>
+          <div id="noDataPI" class="muted hide">ยังไม่มีธุรกรรมหนี้ในช่วงนี้</div>
+          <div class="chart-wrap"><canvas id="chartPI"></canvas></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card" style="flex:1 1 100%">
+          <div class="muted" style="margin-bottom:.5rem">ออมเงินสุทธิสะสม (ฝาก − ถอน)</div>
+          <div class="chart-wrap"><canvas id="chartSavCum"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Transactions List (Read-only) -->
+      <div class="row">
+        <div class="card" style="flex:1 1 100%">
+          <div class="muted" style="margin-bottom:.5rem">รายการธุรกรรม (อ่านอย่างเดียว)</div>
+          <div class="table-viewport">
+            <table>
+              <thead><tr>
+                <th style="width:110px">วันที่</th>
+                <th style="width:160px">ประเภท</th>
+                <th>หมวด</th>
+                <th class="right" style="width:130px">จำนวน</th>
+                <th>หมายเหตุ</th>
+              </tr></thead>
+              <tbody id="tblBody"></tbody>
+            </table>
+          </div>
+          <div id="emptyList" class="muted" style="margin-top:.5rem; display:none">ยังไม่มีรายการ</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" aria-live="polite" role="status">แจ้งเตือน</div>
+  <div id="overlay"><div class="spinner" aria-hidden="true"></div></div>
+
+<script>
+/* ========= CONFIG ========= */
+const API_URL    = 'https://script.google.com/macros/s/AKfycbznJMWIaEVx9NQurW2PO38SUQPSRoYFzSmhZCjNUIDJEFRLv1JmDC2XsQCoBUIlAbm8Uw/exec';
+const ADMIN_KEY  = 'FinedAdminKey_Prod_01';
+const ADMIN_PASS = '1501';
+
+/* หมวดพิเศษต้องตรงกับฝั่ง FE */
+const BUD_CAT_OVERALL   = '__BUDGET_OVERALL__';
+const BUD_CAT_SAVE_GOAL = '__SAVING_GOAL__';
+
+/* ========= STATE & HELPERS ========= */
+let chartExp=null, chartFlow=null, chartSavCum=null, chartDebtTS=null, chartPI=null;
+let users = [];
+let lastItems = [];
+let withdrawIncomeIds = new Set();
+let mentorKey = '';
+
+const $  = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const fmt = n => Number(n||0).toLocaleString('th-TH',{minimumFractionDigits:2, maximumFractionDigits:2});
+function toast(msg, ok=true){ const el=$('#toast'); el.textContent=msg; el.style.background=ok?'#00c896':'#d63031'; el.style.opacity='1'; setTimeout(()=>el.style.opacity='0',2200); }
+const showOverlay = (on)=> $('#overlay').classList.toggle('show', !!on);
+const toYMD = (d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const todayISO = ()=> toYMD(new Date());
+const monthBoundsOf = (d)=>({ start: toYMD(new Date(d.getFullYear(), d.getMonth(), 1)), end: toYMD(new Date(d.getFullYear(), d.getMonth()+1, 0)) });
+const yyyyMmOf = (d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+const sum = (arr, pick) => arr.reduce((s,x)=> s+(pick(x)||0), 0);
+const runningSum = (arr)=>{ let s=0; return arr.map(v=>(s+=v,s)); };
+function _isWithdrawIncomeName(name){ const s=String(name||''); return /ถอน.*ออม|ออม.*ถอน|ถอนออม|ถอนเงินออม|withdraw.*(save|saving)|saving.*withdraw/i.test(s); }
+const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+// date helpers for debt TS
+const ymdToDate = s => { const [Y,M,D]=String(s).split('-').map(Number); return new Date(Y, (M||1)-1, D||1); };
+const addDays = (s, n)=>{ const d=ymdToDate(s); d.setDate(d.getDate()+n); return toYMD(d); };
+const clampEndToToday = (s)=>{ const t=todayISO(); return (!s || s>t) ? t : s; };
+
+/* ========= API (admin) ========= */
+async function apiAdmin(path, payload={}){
+  showOverlay(true);
+  try{
+    const res = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ path, payload, adminKey: ADMIN_KEY }) });
+    const text = await res.text();
+    try{ return JSON.parse(text); }catch(_){ console.error('RAW:', text); return { ok:false, error:'NON_JSON', raw:text }; }
+  }catch(e){ return { ok:false, error:'NETWORK', message:String(e&&e.message||e) }; }
+  finally{ showOverlay(false); }
+}
+
+/* ========= Gate ========= */
+$('#btnEnter').addEventListener('click', onEnter);
+async function onEnter(){
+  if ($('#adminPass').value.trim() !== ADMIN_PASS){ $('#gateMsg').textContent='รหัสผ่านไม่ถูกต้อง'; toast('รหัสผ่านไม่ถูกต้อง', false); return; }
+  $('#gate').classList.add('hide'); $('#app').classList.remove('hide');
+
+  const mb = monthBoundsOf(new Date());
+  $('#fFrom').value = mb.start; $('#fTo').value = mb.end; updateRangeUI();
+
+  const r = await apiAdmin('admin/list_users', {});
+  if (!r.ok){ toast('โหลดรายชื่อผู้ใช้ไม่สำเร็จ', false); return; }
+  users = r.items || [];
+
+  mentorKey = detectMentorKey(users);
+  setupMentorAndUsers(users);
+
+  if (!$('#selUser').disabled && $('#selUser').value){ await refreshDash(); }
+}
+$('#btnLogout').addEventListener('click', ()=>{
+  $('#app').classList.add('hide'); $('#gate').classList.remove('hide');
+  $('#adminPass').value=''; $('#gateMsg').textContent='';
+});
+
+/* ========= Mentor & Users ========= */
+function detectMentorKey(list){
+  if (!Array.isArray(list) || !list.length) return '';
+  const candidates = ['mentor','mentor_name','mentor_id','mentorId','coach','advisor','finmentor','fin_ed_mentor'];
+  for (const k of candidates){
+    if (list.some(u => Object.prototype.hasOwnProperty.call(u, k))){
+      if (list.some(u => String(u[k]||'').trim() !== '')) return k;
+    }
+  }
+  return '';
+}
+function getMentorValue(u){ return String((mentorKey && u[mentorKey] != null) ? u[mentorKey] : '').trim(); }
+
+function setupMentorAndUsers(list){
+  const mentorSel = $('#selMentor');
+  const userSel   = $('#selUser');
+  const savedMentor = localStorage.getItem('admin_mentor') || '';
+  const savedUser   = localStorage.getItem('admin_user') || '';
+
+  function populateUsers(filtered){
+    userSel.innerHTML = '';
+    filtered.forEach(u=>{
+      const o=document.createElement('option');
+      o.value = u.user_id;
+      o.textContent = u.user_id + (u.display_name ? ` • ${u.display_name}` : '');
+      userSel.appendChild(o);
+    });
+    userSel.disabled = filtered.length === 0;
+    if (filtered.length > 0){
+      const idx = Math.max(0, filtered.findIndex(u => u.user_id === savedUser));
+      userSel.selectedIndex = idx;
+      localStorage.setItem('admin_user', userSel.value);
+    }
+  }
+
+  const mentors = mentorKey
+    ? Array.from(new Set(list.map(getMentorValue).filter(v => v && v !== '-'))).sort((a,b)=> a.localeCompare(b,'th'))
+    : [];
+
+  if (!mentorKey || mentors.length === 0){
+    $('#mentorHint').style.display = 'block';
+    mentorSel.innerHTML = `<option value="">(ไม่ใช้ตัวกรอง Mentor)</option>`;
+    mentorSel.disabled = true;
+    populateUsers(list);
+    if (!userSel.disabled && userSel.value) refreshDash();
+    return;
+  }
+
+  $('#mentorHint').style.display = 'none';
+  mentorSel.disabled = false;
+  mentorSel.innerHTML = mentors.map(m => `<option value="${m}">${m}</option>`).join('');
+
+  let pickMentor = savedMentor && mentors.includes(savedMentor) ? savedMentor : mentors[0];
+  mentorSel.value = pickMentor;
+  localStorage.setItem('admin_mentor', pickMentor);
+
+  function applyMentor(){
+    const m = mentorSel.value;
+    localStorage.setItem('admin_mentor', m);
+    const filtered = users.filter(u => getMentorValue(u) === m);
+    populateUsers(filtered);
+    if (!userSel.disabled && userSel.value) refreshDash();
+  }
+  mentorSel.addEventListener('change', applyMentor);
+  applyMentor();
+}
+
+/* ========= Range UI ========= */
+function updateRangeUI(){
+  const f=$('#fFrom').value, t=$('#fTo').value;
+  const today=todayISO(); const mb=monthBoundsOf(new Date());
+  let txt='กำหนดเอง'; const isToday=(f===today && t===today); const isMonth=(f===mb.start && t===mb.end);
+  if (isToday) txt='วันนี้'; else if (isMonth) txt='เดือนนี้';
+  $('#rangeBadge').textContent = txt;
+  $('#btnToday').classList.toggle('active', isToday);
+  $('#btnMonth').classList.toggle('active', isMonth);
+}
+$('#fFrom').addEventListener('change', ()=>{ updateRangeUI(); refreshDash(); });
+$('#fTo').addEventListener('change', ()=>{ updateRangeUI(); refreshDash(); });
+$('#btnToday').addEventListener('click', ()=>{ const d=todayISO(); $('#fFrom').value=d; $('#fTo').value=d; updateRangeUI(); refreshDash(); });
+$('#btnMonth').addEventListener('click', ()=>{ const mb=monthBoundsOf(new Date()); $('#fFrom').value=mb.start; $('#fTo').value=mb.end; updateRangeUI(); refreshDash(); });
+$('#btnRefresh').addEventListener('click', ()=> refreshDash());
+$('#selUser').addEventListener('change', ()=>{ localStorage.setItem('admin_user', $('#selUser').value); refreshDash(); });
+
+/* ========= Budget/Goal (อ่านอย่างเดียว) ========= */
+function monthKeyFromRange(){
+  const f=$('#fFrom').value, t=$('#fTo').value;
+  if (f && t){
+    const fd = new Date(f), td = new Date(t);
+    if (fd.getFullYear()===td.getFullYear() && fd.getMonth()===td.getMonth()){
+      return yyyyMmOf(fd);
+    }
+  }
+  const now=new Date();
+  return yyyyMmOf(now);
+}
+async function loadMonthSettingsForUser(user_id, yyyyMm){
+  const r = await apiAdmin('admin/budgets/summary_by_user', { user_id, month: yyyyMm });
+  let budget=0, goal=0;
+  if (r.ok && Array.isArray(r.items)){
+    for (const it of r.items){
+      const cid = String(it.category_id||'');
+      if (cid === BUD_CAT_OVERALL)   budget = Number(it.limit_amount||0);
+      if (cid === BUD_CAT_SAVE_GOAL) goal   = Number(it.limit_amount||0);
+    }
+  }
+  return { budget, goal };
+}
+function updateBudgetUI(expenseTotal, savingNet, {budget=0, goal=0}={}){
+  const b = Number(budget||0);
+  const pct = (!b || b<=0) ? 0 : Math.round((expenseTotal/b)*100);
+  $('#budgetUsedPct').textContent = b>0 ? `${pct}%` : '—';
+  $('#budgetBar').style.width = (b>0 ? Math.min(pct,100) : 0) + '%';
+  $('#budgetBar').style.filter = (pct>=100)? 'saturate(1.5)' : (pct>=80? 'saturate(1.2)' : 'none');
+
+  let bTxt = 'รายจ่ายเดือนนี้: —';
+  if (b>0){
+    if (expenseTotal > b) bTxt = `รายจ่ายเดือนนี้: เกินมา ${fmt(expenseTotal - b)}`;
+    else                  bTxt = `รายจ่ายเดือนนี้: เหลืองบ ${fmt(b - expenseTotal)}`;
+  }
+  $('#budgetStatus').textContent = bTxt;
+
+  const g = Number(goal||0);
+  const savingClamped = Math.max(0, savingNet);
+  const pctSave = (!g || g<=0) ? 0 : Math.round((savingClamped/g)*100);
+  $('#savingGoalPct').textContent = g>0 ? `${pctSave}%` : '—';
+  $('#savingBar').style.width = (g>0 ? Math.min(pctSave,100) : 0) + '%';
+
+  let sTxt='—';
+  if (g>0){
+    if (savingNet>=g) sTxt = `ถึงเป้าแล้ว (+${fmt(savingNet-g)})`;
+    else              sTxt = `ขาดอีก ${fmt(g - savingNet)}`;
+  }
+  $('#savingGoalStatus').textContent = sTxt;
+}
+
+/* ========= Debt helpers ========= */
+async function loadDebtTotalForUser(user_id){
+  let r = await apiAdmin('admin/debts/summary_by_user', { user_id });
+  if (r.ok){
+    const tot = Number((r.totals && r.totals.total) ?? r.total ?? NaN);
+    if (Number.isFinite(tot)) return Math.max(0, tot);
+
+    if (Array.isArray(r.items) && r.items.length){
+      let sumTotal = 0;
+      for (const it of r.items){
+        const p = Number(it.principal_current||0);
+        const ai = Number(it.accrued_interest||0);
+        const td = (typeof it.total_due === 'number' && Number.isFinite(it.total_due)) ? it.total_due : (p+ai);
+        sumTotal += td;
+      }
+      return Math.max(0, sumTotal);
+    }
+  }
+  r = await apiAdmin('admin/debts/list_by_user', { user_id });
+  if (r.ok && Array.isArray(r.items)){
+    let sumTotal = 0;
+    for (const it of r.items){
+      const p = Number(it.principal_current||0);
+      const ai = Number(it.accrued_interest||0);
+      const td = (typeof it.total_due === 'number' && Number.isFinite(it.total_due)) ? it.total_due : (p+ai);
+      sumTotal += td;
+    }
+    return Math.max(0, sumTotal);
+  }
+  return 0;
+}
+
+/* ========= Dashboard & List ========= */
+function setKpiLoading(on){
+  ['sumIncome','sumExpense','sumSaving','sumNet','sumDebt'].forEach(id=>{
+    const el = $('#'+id);
+    if (on){ el.classList.add('skeleton'); el.textContent=''; }
+    else   { el.classList.remove('skeleton'); }
+  });
+}
+function safeKey(x){ return `${(x.date||'').slice(0,10)}T${(x.time||'00:00:00').slice(0,8)}`; }
+
+function renderList(items){
+  const tb = document.getElementById('tblBody'); tb.innerHTML='';
+  const sorted = items.slice().sort((a,b)=> safeKey(b).localeCompare(safeKey(a)));
+  if (!sorted.length){ document.getElementById('emptyList').style.display='block'; return; }
+  document.getElementById('emptyList').style.display='none';
+
+  for (const x of sorted){
+    const isWithdrawIncome = (x.type==='income' && withdrawIncomeIds.has(String(x.category_id)));
+    const typeTxt = x.type==='income'?(isWithdrawIncome?'รายรับ (ถอนออม)':'รายรับ'):(x.type==='saving'?'ออมเงิน':'รายจ่าย');
+    const badge = x.type==='income' ? (isWithdrawIncome ? 'badge-sav' : 'badge-inc') : (x.type==='saving' ? 'badge-sav' : 'badge-exp');
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td title="${esc((x.date||'').slice(0,10))}">${esc((x.date||'').slice(0,10))}</td>
+      <td><span class="badge ${badge}">${typeTxt}</span></td>
+      <td>${esc(x.category_name || x.category_id || '')}</td>
+      <td class="right">${fmt(x.amount)}</td>
+      <td>${esc(x.note||'')}</td>`;
+    tb.appendChild(tr);
+  }
+}
+
+async function refreshDash(){
+  const user_id = $('#selUser').value;
+  if (!user_id){ return; }
+  const from = $('#fFrom').value, to = $('#fTo').value;
+  setKpiLoading(true);
+
+  const r = await apiAdmin('admin/transactions/list_by_user', { user_id, from, to });
+  if (!r.ok){ setKpiLoading(false); toast('โหลดข้อมูลไม่สำเร็จ', false); return; }
+  const items = (r.items||[]).map(x=> ({...x, amount:+x.amount}));
+  lastItems = items.slice();
+
+  withdrawIncomeIds = new Set();
+  for (const it of items){ if (it.type==='income' && _isWithdrawIncomeName(it.category_name)){ withdrawIncomeIds.add(String(it.category_id)); } }
+
+  const inc    = sum(items, x=> x.type==='income'  ? x.amount : 0);
+  const exp    = sum(items, x=> x.type==='expense' ? x.amount : 0);
+  const savDep = sum(items, x=> x.type==='saving'  ? x.amount : 0);
+  const savWd  = sum(items, x=> x.type==='income' && withdrawIncomeIds.has(String(x.category_id)) ? x.amount : 0);
+  const savNet = savDep - savWd;
+  const net    = inc - exp - savDep;
+
+  $('#sumIncome').textContent = fmt(inc);
+  $('#sumExpense').textContent = fmt(exp);
+  $('#sumSaving').textContent  = fmt(savNet);
+  $('#sumNet').textContent     = fmt(net);
+
+  const debtTotal = await loadDebtTotalForUser(user_id);
+  $('#sumDebt').textContent = fmt(debtTotal);
+
+  setKpiLoading(false);
+
+  const mk = monthKeyFromRange();
+  const { budget, goal } = await loadMonthSettingsForUser(user_id, mk);
+  updateBudgetUI(exp, savNet, {budget, goal});
+  $('#budgetGoalHint').textContent = `* ใช้ข้อมูลงบ/เป้าออมของเดือน ${mk}`;
+
+  /* Charts */
+  const bucketsExp = {};
+  items.filter(x=> x.type==='expense').forEach(x=>{
+    const name = x.category_name || 'อื่น ๆ';
+    bucketsExp[name] = (bucketsExp[name]||0) + x.amount;
+  });
+  const labelsExp = Object.keys(bucketsExp).sort((a,b)=> bucketsExp[b]-bucketsExp[a]);
+  const valuesExp = labelsExp.map(k=> bucketsExp[k]);
+  drawBar($('#chartExp'), labelsExp, valuesExp, 'rgba(233,30,99,0.65)', 'rgba(233,30,99,1)', (c)=> chartExp=c, chartExp);
+
+  drawFlow(items);
+  drawSavingCum(items);
+
+  await drawDebtTimeSeries(user_id, from, to);
+  await drawPrincipalInterestMonthly(user_id, from, to);
+
+  renderList(items);
+}
+
+/* ========= Charts ========= */
+function drawBar(canvas, labels, data, bg, stroke, setRef, current){
+  if (current) current.destroy();
+  const inst = new Chart(canvas, {
+    type:'bar',
+    data:{ labels, datasets:[{ label:'จำนวน (บาท)', data, backgroundColor:bg, borderColor:stroke, borderWidth:1 }] },
+    options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{ y:{ beginAtZero:true }}, plugins:{ legend:{ display:false } } }
+  });
+  setRef(inst);
+}
+function drawFlow(items){
+  if (chartFlow) chartFlow.destroy();
+  const byDate = {};
+  items.forEach(x=>{
+    const d = x.date;
+    if (!byDate[d]) byDate[d] = { inc:0, exp:0, sav:0 };
+    if (x.type==='income')  byDate[d].inc += x.amount;
+    if (x.type==='expense') byDate[d].exp += x.amount;
+    if (x.type==='saving')  byDate[d].sav += x.amount;
+  });
+  const ds = Object.keys(byDate).sort();
+  const inc = ds.map(d=> byDate[d].inc);
+  const exp = ds.map(d=> byDate[d].exp);
+  const sav = ds.map(d=> byDate[d].sav);
+  const netDaily = ds.map((_,i)=> inc[i] - exp[i] - sav[i]);
+  const netCum   = runningSum(netDaily);
+
+  chartFlow = new Chart($('#chartFlow'), {
+    type:'line',
+    data:{ labels: ds,
+      datasets:[
+        { label:'รายรับ', data:inc,   borderColor:'#00c896', backgroundColor:'rgba(0,200,150,.15)', tension:.35, fill:false },
+        { label:'รายจ่าย', data:exp,  borderColor:'#ff4d4f', backgroundColor:'rgba(255,77,79,.15)', tension:.35, fill:false },
+        { label:'คงเหลือสะสม', data:netCum, borderColor:'#6c8cff', backgroundColor:'rgba(108,140,255,.15)', tension:.35, fill:false }
+      ]
+    },
+    options:{ responsive:true, maintainAspectRatio:false, animation:false, interaction:{ mode:'index', intersect:false }, scales:{ y:{ beginAtZero:true } } }
+  });
+}
+function drawSavingCum(items){
+  if (chartSavCum) chartSavCum.destroy();
+  const depByDate = {}, wdByDate = {};
+  items.forEach(x=>{
+    const d=x.date;
+    if (x.type==='saving'){ depByDate[d]=(depByDate[d]||0)+x.amount; }
+    else if (x.type==='income' && _isWithdrawIncomeName(x.category_name)){ wdByDate[d]=(wdByDate[d]||0)+x.amount; }
+  });
+  const dates = Array.from(new Set([...Object.keys(depByDate), ...Object.keys(wdByDate)])).sort();
+  const netPerDay = dates.map(d=> (depByDate[d]||0) - (wdByDate[d]||0));
+  const cum = runningSum(netPerDay);
+  chartSavCum = new Chart($('#chartSavCum'), {
+    type:'line',
+    data:{ labels: dates, datasets:[{ label:'ออมสุทธิสะสม', data:cum, borderColor:'#2dd4bf', backgroundColor:'rgba(45,212,191,.15)', tension:.35, fill:false }] },
+    options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{ y:{ beginAtZero:true }} }
+  });
+}
+
+/* ========= Debt charts (updated) ========= */
+async function drawDebtTimeSeries(user_id, from, to){
+  const panelNo = $('#noDataDebtTS');
+  if (chartDebtTS) chartDebtTS.destroy();
+
+  // ดึงธุรกรรมหนี้ทั้งหมดของผู้ใช้ (เพื่อคำนวณยอดก่อนหน้าได้ถูกต้อง)
+  const [rDebts, rTx] = await Promise.all([
+    apiAdmin('admin/debts/list_by_user', { user_id }),
+    apiAdmin('admin/debts/tx/list_by_user', { user_id })
+  ]);
+  const debts = (rDebts.ok && Array.isArray(rDebts.items)) ? rDebts.items : [];
+  const txAll = (rTx.ok && Array.isArray(rTx.items)) ? rTx.items.map(x => ({
+    date: String(x.date||'').slice(0,10),
+    type: String(x.type||''),
+    amount: Number(x.amount||0),
+    principal_paid: Number(x.principal_paid||0)
+  })) : [];
+
+  if (!debts.length && !txAll.length){
+    panelNo.classList.remove('hide');
+    chartDebtTS=null;
+    return;
+  }
+  panelNo.classList.add('hide');
+
+  // กำหนดช่วงวันที่ที่จะวาด
+  const earliestTx = txAll.length ? txAll.map(t=>t.date).sort()[0] : todayISO();
+  let start = from ? String(from) : earliestTx;
+  let end   = clampEndToToday(to);
+
+  if (!start) start = earliestTx;
+  if (!end)   end   = clampEndToToday(todayISO());
+  if (start > end) start = end; // กันช่วงผิด
+
+  // คำนวณยอดเปิดต้นช่วง = ยอดกู้สะสม - ยอดจ่ายต้นสะสม ก่อนวันเริ่มช่วง
+  const dayBeforeStart = addDays(start, -1);
+  let opening = 0;
+  txAll.forEach(t=>{
+    if (!t.date || t.date > dayBeforeStart) return;
+    if (t.type === 'borrow') opening += t.amount;
+    else if (t.type === 'repay') opening -= t.principal_paid; // ไม่คิดดอก
+  });
+  opening = Math.max(0, opening);
+
+  // รวม delta รายวันในช่วง (borrow = +, repay principal = -)
+  const deltaByDate = {};
+  txAll.forEach(t=>{
+    if (!t.date || t.date < start || t.date > end) return;
+    if (t.type === 'borrow') {
+      deltaByDate[t.date] = (deltaByDate[t.date]||0) + t.amount;
+    } else if (t.type === 'repay') {
+      deltaByDate[t.date] = (deltaByDate[t.date]||0) - t.principal_paid;
+    }
+  });
+
+  // วนสร้าง time series ทีละวัน (รวมวันปลายช่วง)
+  const labels = [];
+  const values = [];
+  let bal = opening;
+  for (let d = start; d <= end; d = addDays(d, 1)){
+    if (deltaByDate[d]) bal = Math.max(0, bal + deltaByDate[d]);
+    labels.push(d);
+    values.push(bal);
+  }
+
+  // กรณีพิเศษ: ไม่มีธุรกรรมเลย แต่มีหนี้คงเหลือ → วาดคงที่ทั้งช่วง
+  if (!txAll.length && debts.length){
+    const tot = debts.reduce((s,it)=>{
+      const p = Number(it.principal_current||0);
+      const ai = Number(it.accrued_interest||0);
+      const td = (typeof it.total_due === 'number' && Number.isFinite(it.total_due)) ? it.total_due : (p+ai);
+      return s + td;
+    },0);
+    labels.length = 0; values.length = 0;
+    for (let d = start; d <= end; d = addDays(d, 1)){ labels.push(d); values.push(Math.max(0, tot)); }
+  }
+
+  chartDebtTS = new Chart($('#chartDebtTS'), {
+    type:'line',
+    data:{
+      labels,
+      datasets:[{
+        label:'ยอดเงินต้นคงเหลือรวม (ไม่คิดดอก)',
+        data:values,
+        borderColor:'#6c8cff',
+        backgroundColor:'rgba(108,140,255,.15)',
+        tension:.35,
+        fill:false
+      }]
+    },
+    options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{ y:{ beginAtZero:true }} }
+  });
+}
+
+async function drawPrincipalInterestMonthly(user_id, from, to){
+  const panelNo = $('#noDataPI');
+  if (chartPI) chartPI.destroy();
+
+  const r = await apiAdmin('admin/debts/tx/list_by_user', { user_id, from, to });
+  const items = (r.ok && Array.isArray(r.items)) ? r.items : [];
+  if (!items.length){
+    panelNo.classList.remove('hide');
+    chartPI=null;
+    return;
+  }
+  panelNo.classList.add('hide');
+
+  const buckets = {};
+  items.forEach(x=>{
+    if (String(x.type||'') !== 'repay') return;
+    const ym = String(x.date||'').slice(0,7);
+    if (!buckets[ym]) buckets[ym] = { prin:0, intr:0 };
+    buckets[ym].prin += Number(x.principal_paid||0);
+    buckets[ym].intr += Number(x.interest_paid||0);
+  });
+
+  const labels = Object.keys(buckets).sort();
+  if (!labels.length){
+    panelNo.classList.remove('hide');
+    chartPI=null;
+    return;
+  }
+  const prin = labels.map(m=> buckets[m].prin);
+  const intr = labels.map(m=> buckets[m].intr);
+
+  chartPI = new Chart($('#chartPI'), {
+    type:'line',
+    data:{ labels,
+      datasets:[
+        { label:'จ่ายต้น (บาท)', data:prin, borderColor:'#00c896', backgroundColor:'rgba(0,200,150,.15)', tension:.35, fill:false },
+        { label:'จ่ายดอก (บาท)', data:intr, borderColor:'#ffb020', backgroundColor:'rgba(255,176,32,.15)', tension:.35, fill:false }
+      ]
+    },
+    options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{ y:{ beginAtZero:true }} }
+  });
+}
+
+/* ========= INIT ========= */
+function init(){
+  ['sumIncome','sumExpense','sumSaving','sumNet','sumDebt'].forEach(id=> $('#'+id).textContent='');
+}
+init();
+</script>
+</body>
+</html>
