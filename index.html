@@ -274,10 +274,17 @@ const runningSum = (arr)=>{ let s=0; return arr.map(v=>(s+=v,s)); };
 function _isWithdrawIncomeName(name){ const s=String(name||''); return /ถอน.*ออม|ออม.*ถอน|ถอนออม|ถอนเงินออม|withdraw.*(save|saving)|saving.*withdraw/i.test(s); }
 const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
-// date helpers for debt TS
+// date helpers
 const ymdToDate = s => { const [Y,M,D]=String(s).split('-').map(Number); return new Date(Y, (M||1)-1, D||1); };
 const addDays = (s, n)=>{ const d=ymdToDate(s); d.setDate(d.getDate()+n); return toYMD(d); };
 const clampEndToToday = (s)=>{ const t=todayISO(); return (!s || s>t) ? t : s; };
+// รวมทุกวันตั้งแต่ from ถึง to (inclusive)
+function dateRangeArray(from, to){
+  const out = []; const df = new Date(from), dt = new Date(to);
+  if (isNaN(df)||isNaN(dt) || df>dt) return out;
+  for (let d=new Date(df); d<=dt; d=new Date(d.getFullYear(), d.getMonth(), d.getDate()+1)){ out.push(toYMD(d)); }
+  return out;
+}
 
 /* ========= API (admin) ========= */
 async function apiAdmin(path, payload={}){
@@ -625,90 +632,105 @@ function drawSavingCum(items){
   });
 }
 
-/* ========= Debt charts (updated) ========= */
+/* ========= Debt charts (ACCRUED = APR/365 like user) ========= */
 async function drawDebtTimeSeries(user_id, from, to){
   const panelNo = $('#noDataDebtTS');
   if (chartDebtTS) chartDebtTS.destroy();
 
-  // ดึงธุรกรรมหนี้ทั้งหมดของผู้ใช้ (เพื่อคำนวณยอดก่อนหน้าได้ถูกต้อง)
+  const end = clampEndToToday(to);
+  const start = from || end;
+  const days = dateRangeArray(start, end);
+  if (!days.length){ panelNo.classList.remove('hide'); chartDebtTS=null; return; }
+
+  // ดึงหนี้ทั้งหมด + ธุรกรรมหนี้ทั้งหมด (ตัดที่ end เพื่อจำลองย้อนหลัง)
   const [rDebts, rTx] = await Promise.all([
-    apiAdmin('admin/debts/list_by_user', { user_id }),
-    apiAdmin('admin/debts/tx/list_by_user', { user_id })
+    apiAdmin('admin/debts/list_by_user',   { user_id }),
+    apiAdmin('admin/debts/tx/list_by_user',{ user_id, to: end })
   ]);
-  const debts = (rDebts.ok && Array.isArray(rDebts.items)) ? rDebts.items : [];
-  const txAll = (rTx.ok && Array.isArray(rTx.items)) ? rTx.items.map(x => ({
-    date: String(x.date||'').slice(0,10),
-    type: String(x.type||''),
-    amount: Number(x.amount||0),
-    principal_paid: Number(x.principal_paid||0)
+
+  const debts = (rDebts.ok && Array.isArray(rDebts.items)) ? rDebts.items.map(d => ({
+    id: String(d.debt_id),
+    name: d.lender_name || '',
+    rate: Number(d.annual_rate || 0),
+    start: String(d.start_date || d.created_at || '').slice(0,10) || start,
+    p0: Number(d.principal_initial || 0),
+    pcur: Number(d.principal_current || 0),
+    accrued0: Number(d.accrued_interest || 0)
   })) : [];
 
-  if (!debts.length && !txAll.length){
-    panelNo.classList.remove('hide');
-    chartDebtTS=null;
-    return;
-  }
+  const txItems = (rTx.ok && Array.isArray(rTx.items)) ? rTx.items.map(x => ({
+    date: String(x.date||'').slice(0,10),
+    debt_id: String(x.debt_id||''),
+    type: String(x.type||''),
+    amount: Number(x.amount||0),
+    principal_paid: Number(x.principal_paid||0),
+    interest_paid: Number(x.interest_paid||0)
+  })) : [];
+
+  if (!debts.length && !txItems.length){ panelNo.classList.remove('hide'); chartDebtTS=null; return; }
   panelNo.classList.add('hide');
 
-  // กำหนดช่วงวันที่ที่จะวาด
-  const earliestTx = txAll.length ? txAll.map(t=>t.date).sort()[0] : todayISO();
-  let start = from ? String(from) : earliestTx;
-  let end   = clampEndToToday(to);
+  const txByDebtDate = {};
+  for (const t of txItems){
+    const key = `${t.debt_id}__${t.date}`;
+    (txByDebtDate[key] ||= []).push(t);
+  }
 
-  if (!start) start = earliestTx;
-  if (!end)   end   = clampEndToToday(todayISO());
-  if (start > end) start = end; // กันช่วงผิด
-
-  // คำนวณยอดเปิดต้นช่วง = ยอดกู้สะสม - ยอดจ่ายต้นสะสม ก่อนวันเริ่มช่วง
-  const dayBeforeStart = addDays(start, -1);
-  let opening = 0;
-  txAll.forEach(t=>{
-    if (!t.date || t.date > dayBeforeStart) return;
-    if (t.type === 'borrow') opening += t.amount;
-    else if (t.type === 'repay') opening -= t.principal_paid; // ไม่คิดดอก
-  });
-  opening = Math.max(0, opening);
-
-  // รวม delta รายวันในช่วง (borrow = +, repay principal = -)
-  const deltaByDate = {};
-  txAll.forEach(t=>{
-    if (!t.date || t.date < start || t.date > end) return;
-    if (t.type === 'borrow') {
-      deltaByDate[t.date] = (deltaByDate[t.date]||0) + t.amount;
-    } else if (t.type === 'repay') {
-      deltaByDate[t.date] = (deltaByDate[t.date]||0) - t.principal_paid;
+  const ONE_DAY_RATE = (apr) => (Number(apr||0) / 100) / 365;
+  const states = debts.map(d => {
+    let principal = 0, accrued = 0;
+    if (d.start && d.start < start){
+      principal = d.p0 > 0 ? d.p0 : (d.pcur > 0 ? d.pcur : 0);
+      accrued = 0; // จะจำลองใหม่ด้วยธุรกรรมก่อนช่วง + ดอกสะสมต่อวัน
     }
+    return { id: d.id, rate: d.rate, start: d.start, principal, accrued };
   });
 
-  // วนสร้าง time series ทีละวัน (รวมวันปลายช่วง)
-  const labels = [];
-  const values = [];
-  let bal = opening;
-  for (let d = start; d <= end; d = addDays(d, 1)){
-    if (deltaByDate[d]) bal = Math.max(0, bal + deltaByDate[d]);
-    labels.push(d);
-    values.push(bal);
+  // ปรับสถานะจากธุรกรรมก่อนช่วง
+  for (const st of states){
+    const txBefore = txItems
+      .filter(t => t.debt_id === st.id && t.date < start)
+      .sort((a,b)=> a.date.localeCompare(b.date));
+    for (const t of txBefore){
+      if (t.type === 'borrow') st.principal += t.amount;
+      else if (t.type === 'repay'){
+        st.accrued   = Math.max(0, st.accrued   - (t.interest_paid||0));
+        st.principal = Math.max(0, st.principal - (t.principal_paid||0));
+      }
+    }
   }
 
-  // กรณีพิเศษ: ไม่มีธุรกรรมเลย แต่มีหนี้คงเหลือ → วาดคงที่ทั้งช่วง
-  if (!txAll.length && debts.length){
-    const tot = debts.reduce((s,it)=>{
-      const p = Number(it.principal_current||0);
-      const ai = Number(it.accrued_interest||0);
-      const td = (typeof it.total_due === 'number' && Number.isFinite(it.total_due)) ? it.total_due : (p+ai);
-      return s + td;
-    },0);
-    labels.length = 0; values.length = 0;
-    for (let d = start; d <= end; d = addDays(d, 1)){ labels.push(d); values.push(Math.max(0, tot)); }
+  const totals = [];
+  for (const day of days){
+    // คิดดอกรายวันจาก principal ปัจจุบัน
+    for (const st of states){
+      if (st.start && st.start > day) continue;
+      if (st.principal > 0){ st.accrued += st.principal * ONE_DAY_RATE(st.rate); }
+    }
+    // ปรับตามธุรกรรมของวันนั้น
+    for (const st of states){
+      const list = txByDebtDate[`${st.id}__${day}`] || [];
+      for (const t of list){
+        if (t.type === 'borrow'){ st.principal += t.amount; }
+        else if (t.type === 'repay'){
+          st.accrued   = Math.max(0, st.accrued   - (t.interest_paid||0));
+          st.principal = Math.max(0, st.principal - (t.principal_paid||0));
+        }
+      }
+    }
+    totals.push(states.reduce((s, st)=> s + st.principal + st.accrued, 0));
   }
+
+  const any = totals.some(v => v > 0);
+  if (!any){ panelNo.classList.remove('hide'); chartDebtTS=null; return; }
 
   chartDebtTS = new Chart($('#chartDebtTS'), {
     type:'line',
     data:{
-      labels,
+      labels: days,
       datasets:[{
-        label:'ยอดเงินต้นคงเหลือรวม (ไม่คิดดอก)',
-        data:values,
+        label:'ยอดหนี้คงเหลือรวมสุทธิ',
+        data: totals,
         borderColor:'#6c8cff',
         backgroundColor:'rgba(108,140,255,.15)',
         tension:.35,
@@ -725,11 +747,7 @@ async function drawPrincipalInterestMonthly(user_id, from, to){
 
   const r = await apiAdmin('admin/debts/tx/list_by_user', { user_id, from, to });
   const items = (r.ok && Array.isArray(r.items)) ? r.items : [];
-  if (!items.length){
-    panelNo.classList.remove('hide');
-    chartPI=null;
-    return;
-  }
+  if (!items.length){ panelNo.classList.remove('hide'); chartPI=null; return; }
   panelNo.classList.add('hide');
 
   const buckets = {};
@@ -742,11 +760,7 @@ async function drawPrincipalInterestMonthly(user_id, from, to){
   });
 
   const labels = Object.keys(buckets).sort();
-  if (!labels.length){
-    panelNo.classList.remove('hide');
-    chartPI=null;
-    return;
-  }
+  if (!labels.length){ panelNo.classList.remove('hide'); chartPI=null; return; }
   const prin = labels.map(m=> buckets[m].prin);
   const intr = labels.map(m=> buckets[m].intr);
 
@@ -763,9 +777,7 @@ async function drawPrincipalInterestMonthly(user_id, from, to){
 }
 
 /* ========= INIT ========= */
-function init(){
-  ['sumIncome','sumExpense','sumSaving','sumNet','sumDebt'].forEach(id=> $('#'+id).textContent='');
-}
+function init(){ ['sumIncome','sumExpense','sumSaving','sumNet','sumDebt'].forEach(id=> $('#'+id).textContent=''); }
 init();
 </script>
 </body>
